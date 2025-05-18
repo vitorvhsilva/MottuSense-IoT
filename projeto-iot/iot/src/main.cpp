@@ -1,200 +1,192 @@
+/*
+ * Sistema de Localização de Motos em Pátio usando WiFi Fingerprinting
+ * 
+ * Este código implementa uma solução IoT para rastreamento de motos em pátios
+ * usando apenas um roteador WiFi e técnica de fingerprinting de sinal.
+ */
+
 #include <Arduino.h>
 #include <WiFi.h>
-#include <PubSubClient.h>
-#include <math.h>
-#include <time.h>
+#include <PubSubClient.h>  // Para comunicação MQTT
+#include <time.h>          // Para obter timestamp preciso
 
-// 1. Configurações de Rede
-const char* SSID_ROUTER = "Wokwi-GUEST";
-const char* PASSWORD = "";
+// ================= CONFIGURAÇÕES DE REDE =================
+const char* SSID_ROUTER = "Wokwi-GUEST"; // SSID do roteador principal
+const char* PASSWORD = "";        // Senha da rede WiFi
 
-// 2. Configurações MQTT
-const char* MQTT_SERVER = "broker.hivemq.com";
-const int MQTT_PORT = 1883;
-const char* MQTT_TOPIC = "patio/motos/tracking";
+// ================= CONFIGURAÇÕES MQTT ====================
+const char* MQTT_SERVER = "broker.hivemq.com"; // Broker público para testes
+const int MQTT_PORT = 1883;                    // Porta padrão MQTT
+const char* MQTT_TOPIC = "patio/motos/localizacao"; // Tópico para publicação
 
-// 3. Configurações NTP
-const char* NTP_SERVER = "pool.ntp.org";
-const long  GMT_OFFSET_SEC = -3 * 3600; // Fuso horário -3h (Brasília)
-const int   DAYLIGHT_OFFSET_SEC = 0;    // Sem horário de verão
+// ================= CONFIGURAÇÕES NTP =====================
+const char* NTP_SERVER = "pool.ntp.org";       // Servidor de tempo
+const long GMT_OFFSET_SEC = -3 * 3600;         // Fuso horário -3h (Brasília)
+const int DAYLIGHT_OFFSET_SEC = 0;             // Sem horário de verão
 
-// 4. Dimensões do Pátio (metros)
-const float PATIO_WIDTH = 50.0;
-const float PATIO_HEIGHT = 30.0;
+// ================= DIMENSÕES DO PÁTIO ===================
+const float PATIO_WIDTH = 50.0;   // Largura total do pátio em metros
+const float PATIO_HEIGHT = 30.0;  // Altura total do pátio em metros
 
-// 5. Posições dos 5 roteadores (x, y)
-const float routerPositions[5][2] = {
-  {0, 0},                   // Roteador 0: Centro
-  {-PATIO_WIDTH/2, -PATIO_HEIGHT/2},  // Roteador 1: Canto inferior esquerdo
-  {PATIO_WIDTH/2, -PATIO_HEIGHT/2},   // Roteador 2: Canto inferior direito
-  {-PATIO_WIDTH/2, PATIO_HEIGHT/2},   // Roteador 3: Canto superior esquerdo
-  {PATIO_WIDTH/2, PATIO_HEIGHT/2}     // Roteador 4: Canto superior direito
-};
-
-// 6. Hardware
-#define LED_PIN 2
-
-// 7. Variáveis globais
-WiFiClient espClient;
-PubSubClient client(espClient);
-
+// ================= ESTRUTURAS DE DADOS ==================
+// Armazena posições 2D (x,y)
 struct Position {
-  float x;
-  float y;
+  float x;  // Coordenada horizontal (metros)
+  float y;  // Coordenada vertical (metros)
 };
 
-Position currentPosition = {0, 0};
-unsigned long lastUpdate = 0;
-float pathLossExponent = 3.5;
-float measuredPower = -40.0;
+// Armazena os dados de fingerprint (mapeamento prévio)
+struct Fingerprint {
+  float x, y;  // Posição física no pátio
+  int rssi;    // Valor médio de RSSI medido nesta posição
+};
 
-// 8. Função para obter timestamp formatado
+// ================= DATABASE DE FINGERPRINTS ==============
+// Valores pré-mapeados (deve ser calibrado no ambiente real)
+const Fingerprint fingerprintDB[5] = {
+  // Centro do pátio
+  {0.0f, 0.0f, -40},  // Posição (x,y) e RSSI médio
+  
+  // Cantos do pátio (inferior esquerdo, inferior direito, superior esquerdo, superior direito)
+  {-PATIO_WIDTH/2, -PATIO_HEIGHT/2, -72},
+  {PATIO_WIDTH/2, -PATIO_HEIGHT/2, -68},
+  {-PATIO_WIDTH/2, PATIO_HEIGHT/2, -75}, 
+  {PATIO_WIDTH/2, PATIO_HEIGHT/2, -70}
+};
+
+// ================= VARIÁVEIS GLOBAIS =====================
+WiFiClient espClient;             // Cliente WiFi
+PubSubClient mqttClient(espClient); // Cliente MQTT
+Position currentEstimate = {0, 0}; // Posição atual estimada
+
+// ================= FUNÇÕES AUXILIARES ====================
+
+/**
+ * Obtém o timestamp atual formatado
+ * Retorna: String no formato "DD-MM-AAAA HH:MM:SS"
+ */
 String getFormattedTime() {
   struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)){
-    return "00-00-0000 00:00:00";
+  if(!getLocalTime(&timeinfo)){  // Tenta obter o tempo local
+    return "00-00-0000 00:00:00"; // Retorno padrão em caso de falha
   }
   
   char timeString[20];
+  // Formata a data e hora
   strftime(timeString, sizeof(timeString), "%d-%m-%Y %H:%M:%S", &timeinfo);
   return String(timeString);
 }
 
-// 9. Função de conexão WiFi
-void setup_wifi() {
-  Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
+/**
+ * Configura a conexão WiFi e sincroniza com servidor NTP
+ */
+void setupWiFi() {
+  Serial.begin(115200); // Inicia comunicação serial
   
   Serial.print("Conectando a ");
   Serial.println(SSID_ROUTER);
 
-  WiFi.begin(SSID_ROUTER, PASSWORD);
+  WiFi.begin(SSID_ROUTER, PASSWORD); // Inicia conexão WiFi
 
+  // Aguarda conexão ser estabelecida
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
 
-  Serial.println("\nWiFi conectado");
-  Serial.print("IP: ");
+  Serial.println("\nConectado!");
+  Serial.print("Endereço IP: ");
   Serial.println(WiFi.localIP());
 
-  // Configura o servidor NTP
+  // Configura o cliente NTP
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
 }
 
-// 10. Conexão MQTT
-void reconnect_mqtt() {
-  while (!client.connected()) {
-    Serial.print("Conectando MQTT...");
-    if (client.connect("motoTracker5AP")) {
-      Serial.println("Conectado");
+/**
+ * Reconecta ao broker MQTT em caso de desconexão
+ */
+void reconnectMQTT() {
+  // Loop até conseguir reconectar
+  while (!mqttClient.connected()) {
+    Serial.print("Conectando ao MQTT...");
+    
+    // Tenta conectar com ID único
+    if (mqttClient.connect("motoTracker01")) {
+      Serial.println("Conectado!");
     } else {
-      Serial.print("falha, rc=");
-      Serial.print(client.state());
+      // Mostra erro e tenta novamente após 5s
+      Serial.print("Falha, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" Tentando novamente em 5s...");
       delay(5000);
     }
   }
 }
 
-// 11. Simulação de distâncias para cada roteador
-void simulateRoutersRSSI(float distances[5]) {
-  if (millis() - lastUpdate > 3000) {
-    lastUpdate = millis();
-    
-    currentPosition.x += random(-200, 201)/100.0;
-    currentPosition.y += random(-200, 201)/100.0;
-    
-    currentPosition.x = constrain(currentPosition.x, -PATIO_WIDTH/2, PATIO_WIDTH/2);
-    currentPosition.y = constrain(currentPosition.y, -PATIO_HEIGHT/2, PATIO_HEIGHT/2);
-  }
-  
+/**
+ * Estima a posição usando interpolação ponderada entre os fingerprints
+ */
+void estimatePosition() {
+  int currentRSSI = WiFi.RSSI(); // Obtém intensidade do sinal atual
+  float totalWeight = 0.0f;      // Soma total dos pesos
+  float x = 0.0f, y = 0.0f;     // Acumuladores de posição
+
+  // Calcula a contribuição de cada ponto de referência
   for (int i = 0; i < 5; i++) {
-    float dx = currentPosition.x - routerPositions[i][0];
-    float dy = currentPosition.y - routerPositions[i][1];
-    distances[i] = sqrt(dx*dx + dy*dy);
+    // O peso é inversamente proporcional à diferença de RSSI
+    float weight = 1.0f / (abs(fingerprintDB[i].rssi - currentRSSI) + 0.1f);
+    totalWeight += weight;
+    x += fingerprintDB[i].x * weight; // Acumula posição x ponderada
+    y += fingerprintDB[i].y * weight; // Acumula posição y ponderada
   }
+
+  // Calcula a posição média ponderada
+  currentEstimate.x = x / totalWeight;
+  currentEstimate.y = y / totalWeight;
 }
 
-// 12. Trilateração com 5 pontos usando mínimos quadrados
-Position calculatePosition(float distances[5]) {
-  float A[4][2], B[4];
-  
-  for (int i = 0; i < 4; i++) {
-    A[i][0] = 2*(routerPositions[i+1][0] - routerPositions[0][0]);
-    A[i][1] = 2*(routerPositions[i+1][1] - routerPositions[0][1]);
-    B[i] = pow(distances[0], 2) - pow(distances[i+1], 2)
-      - pow(routerPositions[0][0], 2) + pow(routerPositions[i+1][0], 2)
-      - pow(routerPositions[0][1], 2) + pow(routerPositions[i+1][1], 2);
-  }
-
-  float ata[2][2] = {0}, atb[2] = {0};
-  
-  for (int i = 0; i < 4; i++) {
-    ata[0][0] += A[i][0] * A[i][0];
-    ata[0][1] += A[i][0] * A[i][1];
-    ata[1][0] += A[i][1] * A[i][0];
-    ata[1][1] += A[i][1] * A[i][1];
-    
-    atb[0] += A[i][0] * B[i];
-    atb[1] += A[i][1] * B[i];
-  }
-
-  float det = ata[0][0]*ata[1][1] - ata[0][1]*ata[1][0];
-  
-  Position pos;
-  if (fabs(det) > 0.001) {
-    pos.x = (ata[1][1]*atb[0] - ata[0][1]*atb[1]) / det;
-    pos.y = (ata[0][0]*atb[1] - ata[1][0]*atb[0]) / det;
-  } else {
-    pos = currentPosition;
-  }
-  
-  return pos;
-}
-
-// 13. Envio de dados via MQTT
+/**
+ * Envia os dados de localização via MQTT
+ */
 void sendLocation() {
-  float distances[5];
-  simulateRoutersRSSI(distances);
+  estimatePosition(); // Atualiza a estimativa de posição
   
-  Position newPos = calculatePosition(distances);
-  
-  if (!isnan(newPos.x) && !isnan(newPos.y)) {
-    currentPosition = newPos;
-  }
-
+  // Constrói o payload JSON
   String payload = "{";
-  payload += "\"position\":{\"x\":" + String(currentPosition.x, 2) + ",\"y\":" + String(currentPosition.y, 2) + "},";
-  payload += "\"distances\":[";
-  for (int i = 0; i < 5; i++) {
-    if (i > 0) payload += ",";
-    payload += String(distances[i], 2);
-  }
-  payload += "],\"timestamp\":\"" + getFormattedTime() + "\"}";
+  payload += "\"device_id\":\"moto_01\",";       // Identificação do dispositivo
+  payload += "\"position\":{\"x\":" + String(currentEstimate.x, 2) + ",\"y\":" + String(currentEstimate.y, 2) + "},"; // Coordenadas
+  payload += "\"rssi\":" + String(WiFi.RSSI()) + ",";  // Intensidade do sinal
+  payload += "\"timestamp\":\"" + getFormattedTime() + "\","; // Data/hora
+  payload += "\"bateria\":" + String(random(20, 101)); // Nível de bateria simulado
+  payload += "}";
 
-  client.publish(MQTT_TOPIC, payload.c_str());
-  Serial.println(payload);
+  // Publica no tópico MQTT
+  if (mqttClient.publish(MQTT_TOPIC, payload.c_str())) {
+    Serial.println("Dados enviados: " + payload);
+  } else {
+    Serial.println("Falha no envio MQTT");
+  }
 }
 
-// 14. Setup inicial
+// ================= SETUP E LOOP PRINCIPAL ================
+
 void setup() {
-  Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  randomSeed(analogRead(0));
+  setupWiFi(); // Configura WiFi e NTP
   
-  setup_wifi();
-  client.setServer(MQTT_SERVER, MQTT_PORT);
+  // Configura cliente MQTT
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+  
+  // Inicializa gerador de números aleatórios
+  randomSeed(analogRead(0)); 
 }
 
-// 15. Loop principal
 void loop() {
-  if (!client.connected()) {
-    reconnect_mqtt();
+  // Verifica conexão MQTT
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
   }
-  client.loop();
+  mqttClient.loop(); // Mantém a conexão MQTT ativa
   
-  sendLocation();
-  delay(5000);
+  sendLocation();    // Envia dados de localização
+  delay(5000);       // Intervalo entre envios (5 segundos)
 }
