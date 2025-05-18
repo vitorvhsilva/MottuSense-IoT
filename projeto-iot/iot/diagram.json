@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "author": "IoT Moto Tracking - MQTT Only",
+  "author": "MotoTracker-Wokwi",
   "editor": "wokwi",
   "parts": [
     {
@@ -22,7 +22,7 @@
       "id": "led1",
       "top": 50,
       "left": 150,
-      "attrs": { "color": "blue" }
+      "attrs": { "color": "red" }
     }
   ],
   "connections": [
@@ -30,6 +30,5 @@
     ["esp:RX0", "$serialMonitor:TX", "", []],
     ["esp:D2", "led1:A", "green", []],
     ["esp:GND", "led1:C", "black", []]
-  ],
-  "dependencies": {}
+  ]
 }
