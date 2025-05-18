@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "IoT Moto Tracking - MQTT Only",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-wifi",
+      "id": "wifi",
+      "top": -100,
+      "left": 200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 50,
+      "left": 150,
+      "attrs": { "color": "blue" }
+    }
+  ],
+  "connections": [
+    ["esp:TX0", "$serialMonitor:RX", "", []],
+    ["esp:RX0", "$serialMonitor:TX", "", []],
+    ["esp:D2", "led1:A", "green", []],
+    ["esp:GND", "led1:C", "black", []]
+  ],
+  "dependencies": {}
+}
