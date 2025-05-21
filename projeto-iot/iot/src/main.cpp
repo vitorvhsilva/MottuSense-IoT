@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>  // Para comunicação MQTT
 #include <time.h>          // Para obter timestamp preciso
+#include <ThingSpeak.h>
 
 // ================= CONFIGURAÇÕES DE REDE =================
 const char* SSID_ROUTER = "Wokwi-GUEST"; // SSID do roteador principal
@@ -27,6 +28,10 @@ const int DAYLIGHT_OFFSET_SEC = 0;             // Sem horário de verão
 // ================= DIMENSÕES DO PÁTIO ===================
 const float PATIO_WIDTH = 50.0;   // Largura total do pátio em metros
 const float PATIO_HEIGHT = 30.0;  // Altura total do pátio em metros
+
+// ================= CONFIGURAÇÕES THING SPEAK ===================
+unsigned long channelID = 2969337; // Substitua 00000 pelo seu Channel ID
+const char* writeAPIKey = "L4A6INVG5ESYJI35"; // Substitua pela sua Write API Key
 
 // ================= ESTRUTURAS DE DADOS ==================
 // Armazena posições 2D (x,y)
@@ -146,7 +151,7 @@ void estimatePosition() {
 }
 
 /**
- * Envia os dados de localização via MQTT
+ * Envia os dados de localização
  */
 void sendLocation() {
   estimatePosition(); // Atualiza a estimativa de posição
@@ -157,8 +162,21 @@ void sendLocation() {
   payload += "\"position\":{\"x\":" + String(currentEstimate.x, 2) + ",\"y\":" + String(currentEstimate.y, 2) + "},"; // Coordenadas
   payload += "\"rssi\":" + String(WiFi.RSSI()) + ",";  // Intensidade do sinal
   payload += "\"timestamp\":\"" + getFormattedTime() + "\","; // Data/hora
-  payload += "\"bateria\":" + String(random(20, 101)); // Nível de bateria simulado
   payload += "}";
+
+  // Envio para os campos do ThingSpeak
+  ThingSpeak.setField(1, currentEstimate.x);
+  ThingSpeak.setField(2, currentEstimate.y);
+  ThingSpeak.setField(3, WiFi.RSSI());
+
+  int status = ThingSpeak.writeFields(channelID, writeAPIKey);
+
+  if (status == 200) {
+    Serial.println("Dados enviados com sucesso para canal ThingSpeak!");
+  } else {
+    Serial.print("Erro ao enviar: ");
+    Serial.println(status);
+  }
 
   // Publica no tópico MQTT
   if (mqttClient.publish(MQTT_TOPIC, payload.c_str())) {
@@ -172,6 +190,7 @@ void sendLocation() {
 
 void setup() {
   setupWiFi(); // Configura WiFi e NTP
+  ThingSpeak.begin(espClient);
   
   // Configura cliente MQTT
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
@@ -188,5 +207,5 @@ void loop() {
   mqttClient.loop(); // Mantém a conexão MQTT ativa
   
   sendLocation();    // Envia dados de localização
-  delay(5000);       // Intervalo entre envios (5 segundos)
+  delay(20000);      // Delay ThingSpeak
 }
