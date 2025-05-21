@@ -57,11 +57,14 @@ pio project init --ide vscode
 
 ## Exemplo de Saída
 ```bash
+json
 {
   "device_id": "moto_01",
-  "position": {"x": -12.3, "y": 8.7},
+  "position": {
+    "x": -12.3,
+    "y": 8.7
+  },
   "rssi": -68,
-  "timestamp": "15-06-2023 14:30:45",
-  "bateria": 85
+  "timestamp": "15-06-2023 14:30:45"
 }
 ```
