@@ -10,6 +10,8 @@
 #include <PubSubClient.h>  // Para comunicação MQTT
 #include <time.h>          // Para obter timestamp preciso
 #include <ThingSpeak.h>
+#include <ArduinoJson.h>
+
 
 // ================= CONFIGURAÇÕES DE REDE =================
 const char* SSID_ROUTER = "Wokwi-GUEST"; // SSID do roteador principal
@@ -18,7 +20,7 @@ const char* PASSWORD = "";        // Senha da rede WiFi
 // ================= CONFIGURAÇÕES MQTT ====================
 const char* MQTT_SERVER = "broker.hivemq.com"; // Broker público para testes
 const int MQTT_PORT = 1883;                    // Porta padrão MQTT
-const char* MQTT_TOPIC = "patio/motos/localizacao"; // Tópico para publicação
+const char* MQTT_TOPIC = "vitorvhsilva/patio/motos/localizacao"; // Tópico para publicação
 
 // ================= CONFIGURAÇÕES NTP =====================
 const char* NTP_SERVER = "pool.ntp.org";       // Servidor de tempo
@@ -114,6 +116,7 @@ void reconnectMQTT() {
   // Loop até conseguir reconectar
   while (!mqttClient.connected()) {
     Serial.print("Conectando ao MQTT...");
+    delay(1000); 
     
     // Tenta conectar com ID único
     if (mqttClient.connect("motoTracker01")) {
@@ -156,13 +159,20 @@ void estimatePosition() {
 void sendLocation() {
   estimatePosition(); // Atualiza a estimativa de posição
   
-  // Constrói o payload JSON
-  String payload = "{";
-  payload += "\"device_id\":\"moto_01\",";       // Identificação do dispositivo
-  payload += "\"position\":{\"x\":" + String(currentEstimate.x, 2) + ",\"y\":" + String(currentEstimate.y, 2) + "},"; // Coordenadas
-  payload += "\"rssi\":" + String(WiFi.RSSI()) + ",";  // Intensidade do sinal
-  payload += "\"timestamp\":\"" + getFormattedTime() + "\","; // Data/hora
-  payload += "}";
+  StaticJsonDocument<256> doc;
+  doc["device_id"] = "moto_01";
+
+  JsonObject position = doc.createNestedObject("position");
+  position["x"] = currentEstimate.x;
+  position["y"] = currentEstimate.y;
+
+  doc["rssi"] = WiFi.RSSI();
+  doc["timestamp"] = getFormattedTime();
+
+  char buffer[256];
+  serializeJson(doc, buffer);
+  Serial.print("Payload MQTT: ");
+  Serial.println(buffer);
 
   // Envio para os campos do ThingSpeak
   ThingSpeak.setField(1, currentEstimate.x);
@@ -179,8 +189,8 @@ void sendLocation() {
   }
 
   // Publica no tópico MQTT
-  if (mqttClient.publish(MQTT_TOPIC, payload.c_str())) {
-    Serial.println("Dados enviados: " + payload);
+  if (mqttClient.publish(MQTT_TOPIC, buffer)) {
+    Serial.println("Dados enviados via MQTT!");
   } else {
     Serial.println("Falha no envio MQTT");
   }
