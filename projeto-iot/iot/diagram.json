@@ -16,19 +16,10 @@
       "top": -100,
       "left": 200,
       "attrs": {}
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led1",
-      "top": 50,
-      "left": 150,
-      "attrs": { "color": "red" }
     }
   ],
   "connections": [
     ["esp:TX0", "$serialMonitor:RX", "", []],
-    ["esp:RX0", "$serialMonitor:TX", "", []],
-    ["esp:D2", "led1:A", "green", []],
-    ["esp:GND", "led1:C", "black", []]
+    ["esp:RX0", "$serialMonitor:TX", "", []]
   ]
 }
