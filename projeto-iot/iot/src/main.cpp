@@ -54,19 +54,34 @@ unsigned long channelID = 2969337;
 const char* writeAPIKey = "L4A6INVG5ESYJI35";
  
 // ================= PROTÓTIPOS DE FUNÇÃO ==================
-const char* EVENTOS_URL = "https://mottusense-dotnet.onrender.com/api/v1/motos/patios/idTeste?pagina=1&tamanho=5";
+const char* EVENTOS_URL = "https://mottusense-dotnet.onrender.com/api/v1/eventos";
+ 
+String toIsoLocalWithOffset(time_t tt);
+void sendEvent();
+void setupWiFi();
+void initMQTT();
+void reconnectMQTT();
+void maintainConnections();
+String getFormattedTime();
+void estimatePosition();
+void sendLocation();
+
  
 String toIsoLocalWithOffset(time_t tt) {
   struct tm tmLocal;
   localtime_r(&tt, &tmLocal);
- 
+
   char buf[32];
-  // Ex.: 2025-09-24T21:10:00-0300
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", &tmLocal);
-  return String(buf);
+
+  String s(buf);
+  if (s.length() > 22) {
+    s = s.substring(0, 22) + ":" + s.substring(22);
+  }
+  return s;
 }
  
-void enviarEvento() {
+void sendEvent() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Evento] Sem WiFi");
     return;
@@ -102,16 +117,6 @@ void enviarEvento() {
   }
   http.end();
 }
- 
- 
- 
-void setupWiFi();
-void initMQTT();
-void reconnectMQTT();
-void maintainConnections();
-String getFormattedTime();
-void estimatePosition();
-void sendLocation();
  
 void setupWiFi() {
   Serial.print("Conectando a ");
@@ -209,7 +214,7 @@ void sendLocation() {
   int status = ThingSpeak.writeFields(channelID, writeAPIKey);
   if (status == 200) {
     Serial.println("Dados enviados para ThingSpeak!");
-    enviarEvento();
+    sendEvent();
   } else {
     Serial.println("Erro ThingSpeak: " + String(status));
   }
